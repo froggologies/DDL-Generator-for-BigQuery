@@ -1,39 +1,65 @@
 import csv
 import argparse
 from datetime import datetime
+import re
+
 
 count_unknown_data_type = 0
 
 
 def convert_data_type(data_type, data_length, data_precision, data_scale):
-    """Converts data types from Oracle to BigQuery."""
+    """Converts Oracle data types to BigQuery equivalents.
+       Handles data_length, data_precision, and data_scale where applicable.
+
+    Args:
+        data_type: Oracle data type (e.g., 'integer', 'varchar(50)', 'numeric(10,2)').
+        data_length: Length of the data type (if applicable).
+        data_precision: Precision of the data type (if applicable).
+        data_scale: Scale of the data type (if applicable).
+
+    Returns:
+        A string representing the equivalent BigQuery data type, or None if no direct mapping is found.
+    """
+
     global count_unknown_data_type
-    data_type = data_type.upper()
-    if data_type == "VARCHAR2" or data_type == "CHAR":
-        if not data_length:
-            return f"STRING"
-        return f"STRING({data_length})"
-    elif data_type == "NUMBER":
-        data_precision = data_precision or "1"
-        data_scale = data_scale or "0"
-        if int(data_precision) >= 30 or int(data_scale) >= 10:
-            return f"BIGNUMERIC({data_precision}, {data_scale})"
-        return f"NUMERIC({data_precision}, {data_scale})"
-    elif data_type == "FLOAT":
-        return f"FLOAT"
-    elif data_type == "BLOB":
-        return "BYTES"
-    elif data_type == "CLOB":
-        return "STRING"
-    elif data_type == "RAW":
-        return "BYTES"
-    elif data_type == "DATE":
-        return "DATE"
-    elif data_type == "TIMESTAMP(6)":
-        return "TIMESTAMP"
-    else:
+
+    type_mapping = {
+        "BLOB": "BYTES",
+        "CHAR": "STRING",
+        "CLOB": "STRING",
+        "DATE": "DATE",
+        "NUMBER": "NUMERIC",
+        "RAW": "BYTES",
+        "TIMESTAMP": "TIMESTAMP",
+        "VARCHAR2": "STRING",
+        "FLOAT": "FLOAT64",
+    }
+
+    data_type = re.sub(r"\(.*?\)", "", data_type).strip().upper()
+
+    bq_type = type_mapping.get(data_type)
+
+    # https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#parameterized_data_types
+
+    # Handle specific cases
+    if bq_type == "NUMERIC":
+        if data_precision != "" and data_scale != "":
+            if int(data_precision) >= 30 or int(data_scale) >= 10:
+                bq_type = f"BIGNUMERIC({data_precision}, {data_scale})"
+            else:
+                bq_type = f"NUMERIC({data_precision}, {data_scale})"
+        elif data_precision != "":
+            bq_type = f"NUMERIC({data_precision}) -- Default scale"
+    elif (
+        bq_type == "STRING" and data_type in ("CHAR", "VARCHAR2") and data_length != ""
+    ):
+        bq_type = f"STRING({data_length})"
+    elif bq_type is None:
         count_unknown_data_type += 1
-        return f"STRING -- Type unknown"  # Default to STRING for unknown types
+        bq_type = f"STRING"
+        print(f"Unknown data type: {data_type}")
+
+    return bq_type
 
 
 def generate_ddl(csv_file):
@@ -41,6 +67,7 @@ def generate_ddl(csv_file):
     ddl = ""
     count_table = 0
     count_total_column = 0
+
     with open(csv_file, "r") as f:
         reader = csv.DictReader(f)
         current_table = ""
@@ -61,16 +88,33 @@ def generate_ddl(csv_file):
                 row["DATA_PRECISION"],
                 row["DATA_SCALE"],
             )
+            ddl += f"  `{column_name}` {data_type}"
+
+            padding = 40 - len(data_type) - len(column_name) - 3
+
             if row["NULLABLE"] == "false":
-                nullable = "NOT NULL"
-                ddl += f"  `{column_name}` {data_type} {nullable},\n"
-            else:
-                ddl += f"  `{column_name}` {data_type},\n"
+                ddl += f" NOT NULL"
+                padding -= 9
+
+            ddl += (
+                f", {" " * padding}"
+                f"-- {row['DATA_TYPE']} {int(row['DATA_LENGTH']) if row['DATA_LENGTH'] else 'N'}-"
+                f"{int(row['DATA_PRECISION']) if row['DATA_PRECISION'] else 'N'}-"
+                f"{int(row['DATA_SCALE']) if row['DATA_SCALE'] else 'N'}\n"
+            )
             count_total_column += 1
             count_table_column += 1
         ddl += f"); -- Column: {str(count_table_column)}"  # Close the last table definition
     iso_date = datetime.now().isoformat()
-    ddl_info = f"/*\nGenerated at: {iso_date}\nTotal table: {str(count_table)}\nTotal column: {str(count_total_column)}\nTotal unknown data type: {str(count_unknown_data_type)}\n*/\n\n"
+    ddl_info = (
+        f"/*\n"
+        f"Generated at: {iso_date}\n"
+        f"Total table: {str(count_table)}\n"
+        f"Total column: {str(count_total_column)}\n"
+        f"Total unknown data type: {str(count_unknown_data_type)}\n"
+        f"comment: -- DATA_TYPE DATA_LENGTH-DATA_PRECISION-DATA_SCALE\n"
+        f"*/\n\n"
+    )
     ddl = ddl_info + ddl
     return ddl
 
