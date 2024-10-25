@@ -24,6 +24,7 @@ def convert_data_type(data_type, data_length, data_precision, data_scale):
     global count_unknown_data_type
 
     type_mapping = {
+        # Oracle:
         "BLOB": "BYTES",
         "CHAR": "STRING",
         "CLOB": "STRING",
@@ -33,6 +34,12 @@ def convert_data_type(data_type, data_length, data_precision, data_scale):
         "TIMESTAMP": "TIMESTAMP",
         "VARCHAR2": "STRING",
         "FLOAT": "FLOAT64",
+        # PostgreSQL:
+        "CHARACTER VARYING": "STRING",
+        "CHARACTER": "STRING",
+        "DATE": "DATE",
+        "NUMERIC": "NUMERIC",
+        "TIMESTAMP WITHOUT TIME ZONE": "TIMESTAMP",
     }
 
     data_type = re.sub(r"\(.*?\)", "", data_type).strip().upper()
@@ -50,9 +57,7 @@ def convert_data_type(data_type, data_length, data_precision, data_scale):
                 bq_type = f"NUMERIC({data_precision}, {data_scale})"
         elif data_precision != "":
             bq_type = f"NUMERIC({data_precision}) -- Default scale"
-    elif (
-        bq_type == "STRING" and data_type in ("CHAR", "VARCHAR2") and data_length != ""
-    ):
+    elif bq_type == "STRING" and data_length != "":
         bq_type = f"STRING({data_length})"
     elif bq_type is None:
         count_unknown_data_type += 1
@@ -127,6 +132,7 @@ if __name__ == "__main__":
         description="Generate BigQuery DDL from a CSV file."
     )
     parser.add_argument("csv_file", help="Path to the CSV file.")
+
     args = parser.parse_args()
 
     # Generate the DDL file
