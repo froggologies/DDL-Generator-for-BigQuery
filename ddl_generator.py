@@ -114,6 +114,7 @@ def generate_ddl(csv_file):
     count_table = 0
     count_total_column = 0
     data_type_counts = Counter()
+    bq_ods_counts = Counter()
 
     with open(csv_file, "r") as f:
         reader = csv.DictReader(f)
@@ -126,6 +127,7 @@ def generate_ddl(csv_file):
                     ddl += f"); -- Column: {str(count_table_column)}\n\n"  # Close previous table definition
                     count_table_column = 0
                 ddl += f"CREATE OR REPLACE TABLE `{table_name}` (\n"
+                bq_ods_counts[row["BQ_ODS"]] += 1
                 current_table = table_name
                 count_table += 1
 
@@ -158,6 +160,11 @@ def generate_ddl(csv_file):
             count_table_column += 1
         ddl += f"); -- Column: {str(count_table_column)}"  # Close the last table definition
 
+    # Identify and format BQ_ODS counts that are more than 1
+    duplicated_tables = "\n".join(
+        [f"- {bq_ods}: {count}" for bq_ods, count in bq_ods_counts.items() if count > 1]
+    )
+
     # Format data type counts for ddl_info
     data_type_info = "\n".join(
         [f"- {data_type}: {count}" for data_type, count in data_type_counts.items()]
@@ -168,14 +175,15 @@ def generate_ddl(csv_file):
         f"Generated at: {datetime.now().isoformat()}\n"
         f"Total table: {str(count_table)}\n"
         f"Total column: {str(count_total_column)}\n"
-        f"Total unknown data type: {str(count_unknown_data_type)}\n"
+        f"Total unknown data type: {str(count_unknown_data_type)}\n\n"
+        f"Duplicated BQ_ODS:"
+        f"{" None" if not duplicated_tables else "\n" + duplicated_tables}\n\n"
         f"Data type counts:\n"
         f"{data_type_info}\n"
         f"*/\n\n"
     )
 
-    ddl = ddl_info + ddl
-    return ddl
+    return ddl_info + ddl
 
 
 if __name__ == "__main__":
