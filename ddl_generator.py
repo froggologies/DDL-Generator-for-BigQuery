@@ -2,23 +2,33 @@ import csv
 import argparse
 from datetime import datetime
 import re
+import logging
+from collections import Counter
 
+# Use a logger for better control and output destination
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
+# Global variable tracking unknown data types
 count_unknown_data_type = 0
 
 
 def convert_data_type(data_type, data_length, data_precision, data_scale):
-    """Converts Oracle data types to BigQuery equivalents.
-       Handles data_length, data_precision, and data_scale where applicable.
+    """
+    Converts Oracle/PostgreSQL data type to BigQuery data type.
 
     Args:
-        data_type: Oracle data type (e.g., 'integer', 'varchar(50)', 'numeric(10,2)').
-        data_length: Length of the data type (if applicable).
-        data_precision: Precision of the data type (if applicable).
-        data_scale: Scale of the data type (if applicable).
+        data_type (str): Oracle/PostgreSQL data type.
+        data_length (str): Length of the data type.
+        data_precision (str): Precision of the data type.
+        data_scale (str): Scale of the data type.
 
     Returns:
-        A string representing the equivalent BigQuery data type, or None if no direct mapping is found.
+        str: BigQuery data type.
+
+    Raises:
+        None
     """
 
     global count_unknown_data_type
@@ -37,9 +47,13 @@ def convert_data_type(data_type, data_length, data_precision, data_scale):
         # PostgreSQL:
         "CHARACTER VARYING": "STRING",
         "CHARACTER": "STRING",
-        "DATE": "DATE",
+        "TEXT": "STRING",
+        "BIGINT": "NUMERIC",
         "NUMERIC": "NUMERIC",
+        "INTEGER": "NUMERIC",
+        "DATE": "DATE",
         "TIMESTAMP WITHOUT TIME ZONE": "TIMESTAMP",
+        "TIMESTAMP WITH TIME ZONE": "TIMESTAMP",
     }
 
     data_type = re.sub(r"\(.*?\)", "", data_type).strip().upper()
@@ -51,27 +65,55 @@ def convert_data_type(data_type, data_length, data_precision, data_scale):
     # Handle specific cases
     if bq_type == "NUMERIC":
         if data_precision != "" and data_scale != "":
-            if int(data_precision) >= 30 or int(data_scale) >= 10:
+            if int(data_precision) <= 38 and int(data_scale) <= 9:
+                bq_type = f"NUMERIC({data_precision}, {data_scale})"
+            elif int(data_precision) <= 76 or int(data_scale) <= 38:
                 bq_type = f"BIGNUMERIC({data_precision}, {data_scale})"
             else:
-                bq_type = f"NUMERIC({data_precision}, {data_scale})"
+                bq_type = f"FLOAT64"
+                logging.warning(
+                    f"Data type: {data_type}, precision: {data_precision}, scale: {data_scale}, using FLOAT64."
+                )
         elif data_precision != "":
-            bq_type = f"NUMERIC({data_precision}) -- Default scale"
+            bq_type = f"NUMERIC({data_precision})"
     elif bq_type == "STRING" and data_length != "":
         bq_type = f"STRING({data_length})"
     elif bq_type is None:
         count_unknown_data_type += 1
         bq_type = f"STRING"
-        print(f"Unknown data type: {data_type}")
+        logging.warning(f"Unknown data type: {data_type}, using STRING as default.")
 
     return bq_type
 
 
 def generate_ddl(csv_file):
-    """Generates BigQuery DDL from a CSV file."""
+    """
+    Generate a BigQuery DDL from a CSV file.
+
+    Args:
+        csv_file (str): Path to the CSV file.
+
+    Returns:
+        str: BigQuery DDL.
+
+    Raises:
+        None
+
+    Notes:
+        The CSV file must contain the following columns:
+            - BQ_ODS: The name of the BigQuery table.
+            - COLUMN_NAME: The name of the column.
+            - DATA_TYPE: The data type of the column in Oracle/PostgreSQL format.
+            - DATA_LENGTH: The length of the data type.
+            - DATA_PRECISION: The precision of the data type.
+            - DATA_SCALE: The scale of the data type.
+            - NULLABLE: Whether the column is nullable.
+    """
+
     ddl = ""
     count_table = 0
     count_total_column = 0
+    data_type_counts = Counter()
 
     with open(csv_file, "r") as f:
         reader = csv.DictReader(f)
@@ -86,6 +128,7 @@ def generate_ddl(csv_file):
                 ddl += f"CREATE OR REPLACE TABLE `{table_name}` (\n"
                 current_table = table_name
                 count_table += 1
+
             column_name = row["COLUMN_NAME"].replace("$", "")
             data_type = convert_data_type(
                 row["DATA_TYPE"],
@@ -93,9 +136,12 @@ def generate_ddl(csv_file):
                 row["DATA_PRECISION"],
                 row["DATA_SCALE"],
             )
+
+            data_type_counts[row["DATA_TYPE"]] += 1
+
             ddl += f"  `{column_name}` {data_type}"
 
-            padding = 40 - len(data_type) - len(column_name) - 3
+            padding = 40 - len(f"  `{column_name}` {data_type}") - 1
 
             if row["NULLABLE"] == "false":
                 ddl += f" NOT NULL"
@@ -103,23 +149,31 @@ def generate_ddl(csv_file):
 
             ddl += (
                 f", {" " * padding}"
-                f"-- {row['DATA_TYPE']} {int(row['DATA_LENGTH']) if row['DATA_LENGTH'] else 'N'}-"
-                f"{int(row['DATA_PRECISION']) if row['DATA_PRECISION'] else 'N'}-"
-                f"{int(row['DATA_SCALE']) if row['DATA_SCALE'] else 'N'}\n"
+                f"-- {row['DATA_TYPE']} "
+                f"{row['DATA_LENGTH']}-"
+                f"{row['DATA_PRECISION']}-"
+                f"{row['DATA_SCALE']}\n"
             )
             count_total_column += 1
             count_table_column += 1
         ddl += f"); -- Column: {str(count_table_column)}"  # Close the last table definition
-    iso_date = datetime.now().isoformat()
+
+    # Format data type counts for ddl_info
+    data_type_info = "\n".join(
+        [f"- {data_type}: {count}" for data_type, count in data_type_counts.items()]
+    )
+
     ddl_info = (
         f"/*\n"
-        f"Generated at: {iso_date}\n"
+        f"Generated at: {datetime.now().isoformat()}\n"
         f"Total table: {str(count_table)}\n"
         f"Total column: {str(count_total_column)}\n"
         f"Total unknown data type: {str(count_unknown_data_type)}\n"
-        f"comment: -- DATA_TYPE DATA_LENGTH-DATA_PRECISION-DATA_SCALE\n"
+        f"Data type counts:\n"
+        f"{data_type_info}\n"
         f"*/\n\n"
     )
+
     ddl = ddl_info + ddl
     return ddl
 
@@ -142,4 +196,5 @@ if __name__ == "__main__":
     output_filename = f"{args.csv_file.split('.')[0]}_{formatted_date}.sql"
     with open(output_filename, "w") as outfile:
         outfile.write(ddl_output)
-    print(f"DDL saved to: {output_filename}")
+
+    logging.info(f"DDL saved to: {output_filename}")
