@@ -54,6 +54,7 @@ def convert_data_type(data_type, data_length, data_precision, data_scale):
         "DATE": "DATE",
         "TIMESTAMP WITHOUT TIME ZONE": "TIMESTAMP",
         "TIMESTAMP WITH TIME ZONE": "TIMESTAMP",
+        "BOOLEAN": "BOOLEAN",
     }
 
     data_type = re.sub(r"\(.*?\)", "", data_type).strip().upper()
