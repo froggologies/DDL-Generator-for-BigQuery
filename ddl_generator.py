@@ -48,6 +48,7 @@ MSSQL_TYPE_MAPPING = {
     "SMALLINT": "INT64",
     "TINYINT": "INT64",
     "NUMERIC": "NUMERIC",
+    "DECIMAL": "NUMERIC",
     "CHAR": "STRING",
     "IMAGE": "BYTES",
 }
