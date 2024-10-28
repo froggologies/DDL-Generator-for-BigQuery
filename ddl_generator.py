@@ -13,49 +13,61 @@ logging.basicConfig(
 # Global variable tracking unknown data types
 count_unknown_data_type = 0
 
+ORACLE_TYPE_MAPPING = {
+    "BLOB": "BYTES",
+    "CHAR": "STRING",
+    "CLOB": "STRING",
+    "DATE": "DATE",
+    "NUMBER": "NUMERIC",
+    "RAW": "BYTES",
+    "TIMESTAMP": "TIMESTAMP",
+    "VARCHAR2": "STRING",
+    "FLOAT": "FLOAT64",
+}
 
-def convert_data_type(data_type, data_length, data_precision, data_scale):
+POSTGRESQL_TYPE_MAPPING = {
+    "CHARACTER VARYING": "STRING",
+    "CHARACTER": "STRING",
+    "TEXT": "STRING",
+    "BIGINT": "NUMERIC",
+    "NUMERIC": "NUMERIC",
+    "INTEGER": "NUMERIC",
+    "DATE": "DATE",
+    "TIMESTAMP WITHOUT TIME ZONE": "TIMESTAMP",
+    "TIMESTAMP WITH TIME ZONE": "TIMESTAMP",
+    "BOOLEAN": "BOOL",
+}
+
+MSSQL_TYPE_MAPPING = {
+    "INT": "INT64",
+    "NVARCHAR": "STRING",
+    "DATETIME": "TIMESTAMP",
+    "BIT": "BOOL",
+    "UNIQUEIDENTIFIER": "STRING",
+    "BIGINT": "INT64",
+    "SMALLINT": "INT64",
+    "TINYINT": "INT64",
+    "NUMERIC": "NUMERIC",
+    "CHAR": "STRING",
+    "IMAGE": "BYTES",
+}
+
+
+def convert_data_type(data_type, data_length, data_precision, data_scale, type_mapping):
     """
-    Converts Oracle/PostgreSQL data type to BigQuery data type.
+    Converts Oracle/PostgreSQL/MS SQL data type to BigQuery data type.
 
     Args:
-        data_type (str): Oracle/PostgreSQL data type.
+        data_type (str): Oracle/PostgreSQL/MS SQL data type.
         data_length (str): Length of the data type.
         data_precision (str): Precision of the data type.
         data_scale (str): Scale of the data type.
 
     Returns:
         str: BigQuery data type.
-
-    Raises:
-        None
     """
 
     global count_unknown_data_type
-
-    type_mapping = {
-        # Oracle:
-        "BLOB": "BYTES",
-        "CHAR": "STRING",
-        "CLOB": "STRING",
-        "DATE": "DATE",
-        "NUMBER": "NUMERIC",
-        "RAW": "BYTES",
-        "TIMESTAMP": "TIMESTAMP",
-        "VARCHAR2": "STRING",
-        "FLOAT": "FLOAT64",
-        # PostgreSQL:
-        "CHARACTER VARYING": "STRING",
-        "CHARACTER": "STRING",
-        "TEXT": "STRING",
-        "BIGINT": "NUMERIC",
-        "NUMERIC": "NUMERIC",
-        "INTEGER": "NUMERIC",
-        "DATE": "DATE",
-        "TIMESTAMP WITHOUT TIME ZONE": "TIMESTAMP",
-        "TIMESTAMP WITH TIME ZONE": "TIMESTAMP",
-        "BOOLEAN": "BOOLEAN",
-    }
 
     data_type = re.sub(r"\(.*?\)", "", data_type).strip().upper()
 
@@ -87,7 +99,7 @@ def convert_data_type(data_type, data_length, data_precision, data_scale):
     return bq_type
 
 
-def generate_ddl(csv_file):
+def generate_ddl(csv_file, type_mapping):
     """
     Generate a BigQuery DDL from a CSV file.
 
@@ -138,28 +150,29 @@ def generate_ddl(csv_file):
                 row["DATA_LENGTH"],
                 row["DATA_PRECISION"],
                 row["DATA_SCALE"],
+                type_mapping,
             )
 
             data_type_counts[row["DATA_TYPE"]] += 1
 
             ddl += f"  `{column_name}` {data_type}"
 
-            padding = 40 - len(f"  `{column_name}` {data_type}") - 1
+            padding = max(1, 40 - len(f"  `{column_name}` {data_type}") - 1)
 
             if row["NULLABLE"] == "false":
                 ddl += f" NOT NULL"
-                padding -= 9
+                padding = max(1, padding - 9)
 
             ddl += (
-                f", {" " * padding}"
-                f"-- {row['DATA_TYPE']} "
+                f", {" " * padding}-- "
+                f"{row['DATA_TYPE']} "
                 f"{row['DATA_LENGTH']}-"
                 f"{row['DATA_PRECISION']}-"
                 f"{row['DATA_SCALE']}\n"
             )
             count_total_column += 1
             count_table_column += 1
-        ddl += f"); -- Column: {str(count_table_column)}"  # Close the last table definition
+        ddl += f"); -- Column: {count_table_column}"  # Close the last table definition
 
     # Identify and format BQ_ODS counts that are more than 1
     duplicated_tables = "\n".join(
@@ -174,9 +187,9 @@ def generate_ddl(csv_file):
     ddl_info = (
         f"/*\n"
         f"Generated at: {datetime.now().isoformat()}\n"
-        f"Total table: {str(count_table)}\n"
-        f"Total column: {str(count_total_column)}\n"
-        f"Total unknown data type: {str(count_unknown_data_type)}\n\n"
+        f"Total table: {count_table}\n"
+        f"Total column: {count_total_column}\n"
+        f"Total unknown data type: {count_unknown_data_type}\n\n"
         f"Duplicated BQ_ODS:"
         f"{" None" if not duplicated_tables else "\n" + duplicated_tables}\n\n"
         f"Data type counts:\n"
@@ -189,18 +202,34 @@ def generate_ddl(csv_file):
 
 if __name__ == "__main__":
 
-    formatted_date = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+    # global type_mapping
 
     parser = argparse.ArgumentParser(
         description="Generate BigQuery DDL from a CSV file."
     )
     parser.add_argument("csv_file", help="Path to the CSV file.")
+    parser.add_argument(
+        "db",
+        choices=["oracle", "postgresql", "mssql"],
+        help="Database type: oracle, postgresql, or mssql.",
+    )
 
     args = parser.parse_args()
 
-    # Generate the DDL file
-    ddl_output = generate_ddl(args.csv_file)
+    if args.db == "oracle":
+        type_mapping = ORACLE_TYPE_MAPPING
+    elif args.db == "postgresql":
+        type_mapping = POSTGRESQL_TYPE_MAPPING
+    elif args.db == "mssql":
+        type_mapping = MSSQL_TYPE_MAPPING
+    else:
+        logging.error(f"Invalid database type: {args.db}")
+        exit(1)
 
+    # Generate the DDL file
+    ddl_output = generate_ddl(args.csv_file, type_mapping)
+
+    formatted_date = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
     # Save the DDL to a file
     output_filename = f"{args.csv_file.split('.')[0]}_{formatted_date}.sql"
     with open(output_filename, "w") as outfile:
