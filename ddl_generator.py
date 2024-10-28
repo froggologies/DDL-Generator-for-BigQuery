@@ -51,6 +51,10 @@ MSSQL_TYPE_MAPPING = {
     "DECIMAL": "NUMERIC",
     "CHAR": "STRING",
     "IMAGE": "BYTES",
+    "VARCHAR": "STRING",
+    "DATE": "DATE",
+    "DATETIME2": "TIMESTAMP",
+    "FLOAT": "FLOAT64",
 }
 
 
