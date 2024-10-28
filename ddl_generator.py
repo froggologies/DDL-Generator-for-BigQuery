@@ -169,7 +169,7 @@ def generate_ddl(csv_file, type_mapping):
                 padding = max(1, padding - 9)
 
             ddl += (
-                f", {" " * padding}-- "
+                f",{" " * padding}-- "
                 f"{row['DATA_TYPE']} "
                 f"{row['DATA_LENGTH']}-"
                 f"{row['DATA_PRECISION']}-"
