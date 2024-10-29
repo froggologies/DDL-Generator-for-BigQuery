@@ -41,7 +41,7 @@ POSTGRESQL_TYPE_MAPPING = {
 MSSQL_TYPE_MAPPING = {
     "INT": "INT64",
     "NVARCHAR": "STRING",
-    "DATETIME": "TIMESTAMP",
+    "DATETIME": "DATETIME",
     "BIT": "BOOL",
     "UNIQUEIDENTIFIER": "STRING",
     "BIGINT": "INT64",
@@ -55,6 +55,9 @@ MSSQL_TYPE_MAPPING = {
     "DATE": "DATE",
     "DATETIME2": "TIMESTAMP",
     "FLOAT": "FLOAT64",
+    "MONEY": "NUMERIC",
+    "NTEXT": "STRING",
+    "SMALLDATETIME": "DATETIME",
 }
 
 
@@ -212,12 +215,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Generate BigQuery DDL from a CSV file."
     )
-    parser.add_argument("csv_file", help="Path to the CSV file.")
     parser.add_argument(
         "db",
         choices=["oracle", "postgresql", "mssql"],
         help="Database type: oracle, postgresql, or mssql.",
     )
+    parser.add_argument("csv_file", help="Path to the CSV file.")
 
     args = parser.parse_args()
 
