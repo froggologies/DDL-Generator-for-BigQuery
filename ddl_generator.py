@@ -4,6 +4,7 @@ from datetime import datetime
 import re
 import logging
 from collections import Counter
+import os
 
 # Use a logger for better control and output destination
 logging.basicConfig(
@@ -210,8 +211,6 @@ def generate_ddl(csv_file, type_mapping):
 
 if __name__ == "__main__":
 
-    # global type_mapping
-
     parser = argparse.ArgumentParser(
         description="Generate BigQuery DDL from a CSV file."
     )
@@ -220,9 +219,13 @@ if __name__ == "__main__":
         choices=["oracle", "postgresql", "mssql"],
         help="Database type: oracle, postgresql, or mssql.",
     )
-    parser.add_argument("csv_file", help="Path to the CSV file.")
+    parser.add_argument(
+        "input_dir", help="Path to the input directory containing CSV files."
+    )
 
     args = parser.parse_args()
+
+    input_dir_full_path = os.path.abspath(args.input_dir)  # Get the absolute path
 
     if args.db == "oracle":
         type_mapping = ORACLE_TYPE_MAPPING
@@ -234,13 +237,50 @@ if __name__ == "__main__":
         logging.error(f"Invalid database type: {args.db}")
         exit(1)
 
-    # Generate the DDL file
-    ddl_output = generate_ddl(args.csv_file, type_mapping)
+    # print("mark 1")
 
-    formatted_date = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-    # Save the DDL to a file
-    output_filename = f"{args.csv_file.split('.')[0]}_{formatted_date}.sql"
-    with open(output_filename, "w") as outfile:
-        outfile.write(ddl_output)
+    # Check if the directory exists.
+    if not os.path.isdir(args.input_dir):
+        logging.error(f"Invalid directory path: {args.input_dir}")
+        exit(1)
 
-    logging.info(f"DDL saved to: {output_filename}")
+    # Iterate through all subfolders
+    for root, _, filenames in os.walk(input_dir_full_path):
+        for filename in filenames:
+            if filename.endswith(".csv"):
+                csv_filepath = os.path.join(
+                    root, filename
+                )  # Use root, not args.input_dir
+
+                # print(csv_filepath)
+                try:
+                    # Reset counter
+                    count_unknown_data_type = 0
+
+                    # Generate DDL for each file
+                    ddl_output = generate_ddl(csv_filepath, type_mapping)
+
+                    formatted_date = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+                    output_filename = f"{filename.split('.')[0]}_{formatted_date}.sql"
+                    output_filepath = os.path.join(
+                        root, output_filename
+                    )  # Output in same directory as CSV
+
+                    with open(output_filepath, "w") as outfile:
+                        outfile.write(ddl_output)
+
+                    logging.info(f"DDL for {filename} saved to: {output_filepath}")
+
+                except Exception as e:  # Catch potential errors during file processing
+                    logging.error(f"Error processing {filename}: {e}")
+
+    # # Generate the DDL file
+    # ddl_output = generate_ddl(args.csv_file, type_mapping)
+
+    # formatted_date = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+    # # Save the DDL to a file
+    # output_filename = f"{args.csv_file.split('.')[0]}_{formatted_date}.sql"
+    # with open(output_filename, "w") as outfile:
+    #     outfile.write(ddl_output)
+
+    # logging.info(f"DDL saved to: {output_filename}")
